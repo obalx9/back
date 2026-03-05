@@ -144,19 +144,38 @@ async function processWebhookAsync(botId: string, update: TelegramUpdate) {
     const bot = botResult.rows[0];
     const chatId = message.chat.id;
 
-    const courseResult = await dbQuery(
-      `SELECT c.id as course_id
-       FROM courses c
-       WHERE c.telegram_chat_id = $1`,
-      [chatId]
-    );
+    let courseId: string | null = null;
 
-    if (courseResult.rows.length === 0) {
-      logger.debug(`Message from unlinked chat ${chatId}`);
+    if (bot.course_id) {
+      courseId = bot.course_id;
+    } else {
+      const courseResult = await dbQuery(
+        `SELECT c.id as course_id
+         FROM courses c
+         WHERE c.telegram_chat_id = $1`,
+        [chatId]
+      );
+      if (courseResult.rows.length > 0) {
+        courseId = courseResult.rows[0].course_id;
+      }
+    }
+
+    if (!courseId) {
+      const linkedResult = await dbQuery(
+        `SELECT course_id FROM telegram_linked_chats WHERE chat_id = $1 LIMIT 1`,
+        [chatId.toString()]
+      );
+      if (linkedResult.rows.length > 0) {
+        courseId = linkedResult.rows[0].course_id;
+      }
+    }
+
+    if (!courseId) {
+      logger.debug(`Message from unlinked chat ${chatId}, bot ${botId}`);
       return;
     }
 
-    const { course_id } = courseResult.rows[0];
+    const course_id = courseId;
 
     if (message.media_group_id) {
       await handleMediaGroupMessage(bot.bot_token, course_id, message);

@@ -345,51 +345,61 @@ router.get('/yandex/callback', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/oauth/vk/exchange - Exchange VK code for user (frontend PKCE flow)
+// POST /api/oauth/vk/exchange - Exchange VK access_token (from VK ID SDK) for our JWT
 router.post('/vk/exchange', async (req: Request, res: Response) => {
   try {
-    const { code, code_verifier, device_id, redirect_uri: clientRedirectUri } = req.body;
+    const { access_token, user_id: vkUserId, code, code_verifier, device_id, redirect_uri: clientRedirectUri } = req.body;
     const VK_CLIENT_ID = process.env.VK_CLIENT_ID;
     const VK_CLIENT_SECRET = process.env.VK_CLIENT_SECRET;
     const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
-    if (!VK_CLIENT_ID || !VK_CLIENT_SECRET) {
+    if (!VK_CLIENT_ID) {
       return res.status(500).json({ error: 'VK OAuth not configured' });
     }
 
-    if (!code || !code_verifier) {
-      return res.status(400).json({ error: 'code and code_verifier are required' });
-    }
+    let vkAccessToken: string;
 
-    const VK_REDIRECT_URI = clientRedirectUri || process.env.VK_FRONTEND_REDIRECT_URI || `${APP_URL}/auth/vk/callback`;
+    if (access_token) {
+      vkAccessToken = access_token;
+    } else if (code && code_verifier) {
+      if (!VK_CLIENT_SECRET) {
+        return res.status(500).json({ error: 'VK OAuth not configured' });
+      }
 
-    const vkTokenParams: Record<string, string> = {
-      grant_type: 'authorization_code',
-      code,
-      code_verifier,
-      client_id: VK_CLIENT_ID,
-      client_secret: VK_CLIENT_SECRET,
-      redirect_uri: VK_REDIRECT_URI,
-    };
-    if (device_id) vkTokenParams.device_id = device_id;
+      const VK_REDIRECT_URI = clientRedirectUri || process.env.VK_FRONTEND_REDIRECT_URI || `${APP_URL}/auth/vk/callback`;
 
-    const tokenResponse = await fetch('https://id.vk.ru/oauth2/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(vkTokenParams),
-    });
+      const vkTokenParams: Record<string, string> = {
+        grant_type: 'authorization_code',
+        code,
+        code_verifier,
+        client_id: VK_CLIENT_ID,
+        client_secret: VK_CLIENT_SECRET,
+        redirect_uri: VK_REDIRECT_URI,
+      };
+      if (device_id) vkTokenParams.device_id = device_id;
 
-    const tokenData: any = await tokenResponse.json();
+      const tokenResponse = await fetch('https://id.vk.ru/oauth2/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(vkTokenParams),
+      });
 
-    if (tokenData.error) {
-      return res.status(400).json({ error: tokenData.error_description || tokenData.error });
+      const tokenData: any = await tokenResponse.json();
+
+      if (tokenData.error) {
+        return res.status(400).json({ error: tokenData.error_description || tokenData.error });
+      }
+
+      vkAccessToken = tokenData.access_token;
+    } else {
+      return res.status(400).json({ error: 'access_token or code+code_verifier are required' });
     }
 
     const userInfoResponse = await fetch('https://id.vk.ru/oauth2/user_info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        access_token: tokenData.access_token,
+        access_token: vkAccessToken,
         client_id: VK_CLIENT_ID,
       }),
     });

@@ -203,6 +203,14 @@ router.get('/:id/bot', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
+    const byCoursResult = await query(`
+      SELECT * FROM telegram_bots WHERE course_id = $1 AND is_active = true LIMIT 1
+    `, [id]);
+
+    if (byCoursResult.rows.length > 0) {
+      return res.json(byCoursResult.rows[0]);
+    }
+
     const sellerResult = await query(`
       SELECT s.id FROM sellers s
       JOIN courses c ON c.seller_id = s.id
@@ -240,10 +248,10 @@ router.post('/:id/bot', async (req: AuthRequest, res) => {
     const sellerId = ownerCheck.rows[0].seller_id;
 
     const result = await query(`
-      INSERT INTO telegram_bots (seller_id, bot_token, bot_username, is_active)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO telegram_bots (seller_id, course_id, bot_token, bot_username, is_active)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
-    `, [sellerId, bot_token, bot_username, is_active ?? true]);
+    `, [sellerId, id, bot_token, bot_username, is_active ?? true]);
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -265,6 +273,14 @@ router.get('/:id/telegram-bot', async (req: AuthRequest, res) => {
 
     if (ownerCheck.rows.length === 0) {
       return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const byCoursResult = await query(`
+      SELECT * FROM telegram_bots WHERE course_id = $1 AND is_active = true LIMIT 1
+    `, [id]);
+
+    if (byCoursResult.rows.length > 0) {
+      return res.json(byCoursResult.rows[0]);
     }
 
     const sellerResult = await query(`
