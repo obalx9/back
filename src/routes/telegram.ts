@@ -602,17 +602,27 @@ async function handleMediaGroupMessage(
         course_id,
         media_group_id,
         telegram_message_id,
+        file_id,
+        media_type,
         media_data,
         caption,
+        file_name,
+        file_size,
+        mime_type,
         message_date
-      ) VALUES ($1, $2, $3, $4, $5, $6)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (media_group_id, telegram_message_id) DO NOTHING`,
       [
         courseId,
         message.media_group_id,
         message.message_id,
+        mediaData.file_id || '',
+        mediaData.media_type || 'photo',
         JSON.stringify(mediaData),
         message.caption || null,
+        mediaData.file_name || null,
+        mediaData.file_size || null,
+        mediaData.mime_type || null,
         messageDate,
       ]
     );
