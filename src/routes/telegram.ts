@@ -271,13 +271,18 @@ async function handleGroupMessage(bot: any, message: TelegramMessage) {
 
 const KEYBOARD = {
   keyboard: [
-    [{ text: 'Начать импорт' }, { text: 'Завершить импорт' }],
-    [{ text: 'Статус' }, { text: 'Помощь' }],
+    [{ text: '▶️ Начать импорт' }, { text: '⏹ Завершить импорт' }],
+    [{ text: '📊 Статус' }, { text: '❓ Помощь' }],
   ],
   resize_keyboard: true,
+  persistent: true,
 };
 
 const BUTTON_TO_COMMAND: Record<string, string> = {
+  '▶️ Начать импорт': '/import',
+  '⏹ Завершить импорт': '/done',
+  '📊 Статус': '/status',
+  '❓ Помощь': '/help',
   'Начать импорт': '/import',
   'Завершить импорт': '/done',
   'Статус': '/status',
