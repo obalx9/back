@@ -257,7 +257,7 @@ export function extractMediaData(message: TelegramMessage): MediaData {
     mediaType = 'audio';
     fileId = message.audio.file_id;
     fileSize = message.audio.file_size || null;
-    fileName = message.audio.file_name || null;
+    fileName = message.audio.file_id || null;
     mimeType = message.audio.mime_type || null;
     duration = message.audio.duration;
   } else if (message.animation) {
