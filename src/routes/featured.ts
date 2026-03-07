@@ -23,13 +23,13 @@ router.get('/', async (req, res) => {
 
 router.post('/', requireRole('super_admin'), async (req: AuthRequest, res) => {
   try {
-    const { title, description, category, instructor, image_url, order_index, is_active } = req.body;
+    const { title, description, category, instructor, image_url, order_index, is_active, course_id } = req.body;
 
     const result = await query(`
-      INSERT INTO featured_courses (title, description, category, instructor, image_url, order_index, is_active)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO featured_courses (course_id, title, description, category, instructor, image_url, order_index, is_active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
-    `, [title, description, category || '', instructor || '', image_url || '', order_index || 0, is_active !== false]);
+    `, [course_id || null, title || '', description || '', category || '', instructor || '', image_url || '', order_index || 0, is_active !== false]);
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -41,14 +41,14 @@ router.post('/', requireRole('super_admin'), async (req: AuthRequest, res) => {
 router.put('/:id', requireRole('super_admin'), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { title, description, category, instructor, image_url, order_index, is_active } = req.body;
+    const { title, description, category, instructor, image_url, order_index, is_active, course_id } = req.body;
 
     const result = await query(`
       UPDATE featured_courses
-      SET title = $1, description = $2, category = $3, instructor = $4, image_url = $5, order_index = $6, is_active = $7
-      WHERE id = $8
+      SET course_id = $1, title = $2, description = $3, category = $4, instructor = $5, image_url = $6, order_index = $7, is_active = $8
+      WHERE id = $9
       RETURNING *
-    `, [title, description, category, instructor, image_url, order_index, is_active, id]);
+    `, [course_id || null, title, description, category, instructor, image_url, order_index, is_active, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Featured course not found' });
