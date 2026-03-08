@@ -382,14 +382,16 @@ CREATE TABLE IF NOT EXISTS pkce_sessions (
 
 CREATE TABLE IF NOT EXISTS featured_courses (
   id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  title       text        NOT NULL,
+  course_id   uuid        REFERENCES courses(id) ON DELETE SET NULL,
+  order_index integer     NOT NULL DEFAULT 0,
+  is_active   boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  title       text        NOT NULL DEFAULT '',
   description text        NOT NULL DEFAULT '',
   category    text        NOT NULL DEFAULT '',
   instructor  text        NOT NULL DEFAULT '',
   image_url   text        NOT NULL DEFAULT '',
-  order_index integer     NOT NULL DEFAULT 0,
-  is_active   boolean     NOT NULL DEFAULT true,
-  created_at  timestamptz NOT NULL DEFAULT now(),
+  show_button boolean     NOT NULL DEFAULT true,
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
 

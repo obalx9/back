@@ -444,6 +444,12 @@ END $$;
 
 -- telegram_bots
 DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='telegram_bots' AND column_name='channel_id') THEN
+    ALTER TABLE telegram_bots ADD COLUMN channel_id text;
+  END IF;
+END $$;
+
+DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='telegram_bots' AND column_name='seller_id') THEN
     ALTER TABLE telegram_bots ADD COLUMN seller_id uuid REFERENCES sellers(id) ON DELETE CASCADE;
   END IF;
@@ -510,7 +516,9 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- telegram_media_group_buffer
+-- telegram_media_group_buffer: ensure file_id has a default
+ALTER TABLE telegram_media_group_buffer ALTER COLUMN file_id SET DEFAULT '';
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='telegram_media_group_buffer' AND column_name='media_data') THEN
     ALTER TABLE telegram_media_group_buffer ADD COLUMN media_data jsonb;
@@ -667,6 +675,25 @@ CREATE TABLE IF NOT EXISTS ads_posts (
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now()
 );
+
+-- ============================================================================
+-- FIX CHECK CONSTRAINTS
+-- ============================================================================
+
+ALTER TABLE course_post_media DROP CONSTRAINT IF EXISTS course_post_media_media_type_check;
+ALTER TABLE course_post_media ADD CONSTRAINT course_post_media_media_type_check
+  CHECK (media_type = ANY (ARRAY['video'::text, 'image'::text, 'document'::text, 'photo'::text, 'audio'::text, 'animation'::text, 'voice'::text, 'media_group'::text]));
+
+ALTER TABLE course_posts DROP CONSTRAINT IF EXISTS course_posts_media_type_check;
+ALTER TABLE course_posts ADD CONSTRAINT course_posts_media_type_check
+  CHECK (media_type = ANY (ARRAY['video'::text, 'image'::text, 'document'::text, 'text'::text, 'file'::text, 'photo'::text, 'audio'::text, 'animation'::text, 'media_group'::text, 'voice'::text]));
+
+-- ============================================================================
+-- UNIQUE CONSTRAINTS
+-- ============================================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_media_group_buffer_unique
+  ON telegram_media_group_buffer (media_group_id, telegram_message_id);
 
 -- ============================================================================
 -- MISSING INDEXES
