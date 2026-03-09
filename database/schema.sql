@@ -439,6 +439,29 @@ CREATE TABLE IF NOT EXISTS premium_courses (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS site_contacts (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  label       text        NOT NULL DEFAULT '',
+  value       text        NOT NULL DEFAULT '',
+  icon        text        NOT NULL DEFAULT 'Mail',
+  url         text,
+  order_index int         NOT NULL DEFAULT 0,
+  is_active   boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS site_metrics (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  label       text        NOT NULL DEFAULT '',
+  value       text        NOT NULL DEFAULT '',
+  icon        text        NOT NULL DEFAULT 'TrendingUp',
+  order_index int         NOT NULL DEFAULT 0,
+  is_active   boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now()
+);
+
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
@@ -632,6 +655,16 @@ CREATE TRIGGER update_ads_posts_updated_at
   BEFORE UPDATE ON ads_posts
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_site_contacts_updated_at ON site_contacts;
+CREATE TRIGGER update_site_contacts_updated_at
+  BEFORE UPDATE ON site_contacts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_site_metrics_updated_at ON site_metrics;
+CREATE TRIGGER update_site_metrics_updated_at
+  BEFORE UPDATE ON site_metrics
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- ============================================================================
 -- ROW LEVEL SECURITY - DISABLED (auth handled by backend JWT middleware)
 -- ============================================================================
@@ -664,3 +697,5 @@ ALTER TABLE ad_posts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ad_post_stats DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ads_posts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE premium_courses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE site_contacts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE site_metrics DISABLE ROW LEVEL SECURITY;

@@ -16,6 +16,7 @@ import sellersRouter from './routes/sellers.js';
 import enrollmentsRouter from './routes/enrollments.js';
 import contactsRouter from './routes/contacts.js';
 import metricsRouter from './routes/metrics.js';
+import scriptsRouter from './routes/scripts.js';
 import { authMiddleware, optionalAuthMiddleware } from './middleware/auth.js';
 
 const app = express();
@@ -54,6 +55,11 @@ app.use('/api/metrics', (req, res, next) => {
   if (req.method === 'GET') return next();
   return authMiddleware(req as any, res, next);
 }, metricsRouter);
+
+app.use('/api/scripts', (req, res, next) => {
+  if (req.method === 'GET') return next();
+  return authMiddleware(req as any, res, next);
+}, scriptsRouter);
 
 // Mixed routes: GET is public, write operations require auth
 app.use('/api/ads', (req, res, next) => {

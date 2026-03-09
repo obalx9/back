@@ -859,3 +859,64 @@ ALTER TABLE ad_posts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ad_post_stats DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ads_posts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE premium_courses DISABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- SITE CONTACTS AND METRICS TABLES
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS site_contacts (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  label       text        NOT NULL DEFAULT '',
+  value       text        NOT NULL DEFAULT '',
+  icon        text        NOT NULL DEFAULT 'Mail',
+  url         text,
+  order_index int         NOT NULL DEFAULT 0,
+  is_active   boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS site_metrics (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  label       text        NOT NULL DEFAULT '',
+  value       text        NOT NULL DEFAULT '',
+  icon        text        NOT NULL DEFAULT 'TrendingUp',
+  order_index int         NOT NULL DEFAULT 0,
+  is_active   boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now()
+);
+
+DROP TRIGGER IF EXISTS update_site_contacts_updated_at ON site_contacts;
+CREATE TRIGGER update_site_contacts_updated_at
+  BEFORE UPDATE ON site_contacts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_site_metrics_updated_at ON site_metrics;
+CREATE TRIGGER update_site_metrics_updated_at
+  BEFORE UPDATE ON site_metrics
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+INSERT INTO site_contacts (label, value, icon, url, order_index)
+SELECT 'Email', 'info@keykurs.ru', 'Mail', 'mailto:info@keykurs.ru', 0
+WHERE NOT EXISTS (SELECT 1 FROM site_contacts LIMIT 1);
+
+INSERT INTO site_contacts (label, value, icon, url, order_index)
+SELECT 'Telegram', '@keykurs', 'Send', 'https://t.me/keykurs', 1
+WHERE NOT EXISTS (SELECT 1 FROM site_contacts WHERE order_index = 1);
+
+INSERT INTO site_contacts (label, value, icon, url, order_index)
+SELECT 'ВКонтакте', 'vk.com/keykurs', 'Globe', 'https://vk.com/keykurs', 2
+WHERE NOT EXISTS (SELECT 1 FROM site_contacts WHERE order_index = 2);
+
+INSERT INTO site_metrics (label, value, icon, order_index)
+SELECT 'Курсов', '500+', 'BookOpen', 0
+WHERE NOT EXISTS (SELECT 1 FROM site_metrics LIMIT 1);
+
+INSERT INTO site_metrics (label, value, icon, order_index)
+SELECT 'Студентов', '10 000+', 'Users', 1
+WHERE NOT EXISTS (SELECT 1 FROM site_metrics WHERE order_index = 1);
+
+INSERT INTO site_metrics (label, value, icon, order_index)
+SELECT 'Преподавателей', '150+', 'Award', 2
+WHERE NOT EXISTS (SELECT 1 FROM site_metrics WHERE order_index = 2);
