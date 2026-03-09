@@ -57,7 +57,7 @@ app.use('/api/metrics', (req, res, next) => {
 }, metricsRouter);
 
 app.use('/api/scripts', (req, res, next) => {
-  if (req.method === 'GET') return next();
+  if (req.method === 'GET' && !req.path.startsWith('/all')) return next();
   return authMiddleware(req as any, res, next);
 }, scriptsRouter);
 
