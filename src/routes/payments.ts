@@ -9,6 +9,10 @@ const YOOKASSA_SHOP_ID = process.env.YOOKASSA_SHOP_ID || '';
 const YOOKASSA_SECRET_KEY = process.env.YOOKASSA_SECRET_KEY || '';
 const PLATFORM_FEE_PERCENT = 10;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Tax system: usn_income, usn_income_outcome, envd, esn, patent, osn
+const TAX_SYSTEM_CODE = process.env.YOOKASSA_TAX_SYSTEM || 'usn_income';
+// VAT code: 1=без НДС, 2=0%, 3=10%, 4=20%
+const VAT_CODE = parseInt(process.env.YOOKASSA_VAT_CODE || '1', 10);
 
 function yookassaAuth() {
   return 'Basic ' + Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`).toString('base64');
@@ -62,6 +66,7 @@ router.post('/create', async (req: AuthRequest, res) => {
       [course_id]
     );
 
+
     if (courseResult.rows.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
     }
@@ -101,6 +106,14 @@ router.post('/create', async (req: AuthRequest, res) => {
       return res.status(500).json({ error: 'YooKassa не настроен: отсутствуют YOOKASSA_SHOP_ID или YOOKASSA_SECRET_KEY на сервере' });
     }
 
+    // Fetch buyer's email for the fiscal receipt (required by 54-FZ)
+    const userResult = await query('SELECT email, first_name, last_name FROM users WHERE id = $1', [userId]);
+    const buyerEmail = userResult.rows[0]?.email || null;
+
+    if (!buyerEmail) {
+      return res.status(400).json({ error: 'Для оплаты необходим email. Пожалуйста, укажите email в профиле.' });
+    }
+
     const amount = course.price;
     const platformFee = Math.round(amount * PLATFORM_FEE_PERCENT / 100);
     const sellerAmount = amount - platformFee;
@@ -109,6 +122,24 @@ router.post('/create', async (req: AuthRequest, res) => {
     const rawKey = `${userId}-${course_id}-${Date.now()}`;
     const idempotenceKey = rawKey.length <= 64 ? rawKey : rawKey.slice(rawKey.length - 64);
     const description = `Курс: ${course.title}`.slice(0, 128);
+
+    const receipt = {
+      customer: { email: buyerEmail },
+      tax_system_code: TAX_SYSTEM_CODE,
+      items: [
+        {
+          description: course.title.slice(0, 128),
+          quantity: '1.00',
+          amount: {
+            value: (amount / 100).toFixed(2),
+            currency: 'RUB',
+          },
+          vat_code: VAT_CODE,
+          payment_mode: 'full_payment',
+          payment_subject: 'service',
+        },
+      ],
+    };
 
     const yookassaResponse = await fetch('https://api.yookassa.ru/v3/payments', {
       method: 'POST',
@@ -128,6 +159,7 @@ router.post('/create', async (req: AuthRequest, res) => {
         },
         capture: true,
         description,
+        receipt,
         metadata: {
           course_id: String(course_id),
           user_id: String(userId),
