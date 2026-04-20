@@ -17,6 +17,7 @@ import enrollmentsRouter from './routes/enrollments.js';
 import contactsRouter from './routes/contacts.js';
 import metricsRouter from './routes/metrics.js';
 import scriptsRouter from './routes/scripts.js';
+import paymentsRouter from './routes/payments.js';
 import { authMiddleware, optionalAuthMiddleware } from './middleware/auth.js';
 
 const app = express();
@@ -81,6 +82,14 @@ app.use('/media', (req, res, next) => {
   if (req.method === 'GET') return optionalAuthMiddleware(req as any, res, next);
   return authMiddleware(req as any, res, next);
 }, mediaRouter);
+
+// Payment routes: webhook is public, course public info is public, rest requires auth
+app.use('/api/payments/webhook', paymentsRouter);
+app.use('/api/payments/course', paymentsRouter);
+app.use('/api/payments', (req, res, next) => {
+  if (req.path.startsWith('/webhook') || req.path.startsWith('/course')) return next();
+  return authMiddleware(req as any, res, next);
+}, paymentsRouter);
 
 // Protected routes (auth required)
 app.use('/api/courses', authMiddleware, coursesRouter);
