@@ -14,6 +14,10 @@ function yookassaAuth() {
   return 'Basic ' + Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`).toString('base64');
 }
 
+function yookassaConfigured() {
+  return YOOKASSA_SHOP_ID.length > 0 && YOOKASSA_SECRET_KEY.length > 0;
+}
+
 // GET /api/payments/course/:courseId/public — public course info for payment page
 router.get('/course/:courseId/public', async (req, res) => {
   try {
@@ -92,11 +96,17 @@ router.post('/create', async (req: AuthRequest, res) => {
       });
     }
 
+    if (!yookassaConfigured()) {
+      logger.error('YooKassa credentials are not configured (YOOKASSA_SHOP_ID / YOOKASSA_SECRET_KEY)');
+      return res.status(500).json({ error: 'YooKassa не настроен: отсутствуют YOOKASSA_SHOP_ID или YOOKASSA_SECRET_KEY на сервере' });
+    }
+
     const amount = course.price;
     const platformFee = Math.round(amount * PLATFORM_FEE_PERCENT / 100);
     const sellerAmount = amount - platformFee;
 
     const idempotenceKey = `${userId}-${course_id}-${Date.now()}`;
+    const description = `Курс: ${course.title}`.slice(0, 128);
 
     const yookassaResponse = await fetch('https://api.yookassa.ru/v3/payments', {
       method: 'POST',
@@ -115,18 +125,29 @@ router.post('/create', async (req: AuthRequest, res) => {
           return_url: `${FRONTEND_URL}/pay/${course_id}?status=success`,
         },
         capture: true,
-        description: `Курс: ${course.title}`,
+        description,
         metadata: {
-          course_id,
-          user_id: userId,
+          course_id: String(course_id),
+          user_id: String(userId),
         },
       }),
     });
 
     if (!yookassaResponse.ok) {
-      const err = await yookassaResponse.json().catch(() => ({}));
-      logger.error('YooKassa create payment error:', err);
-      return res.status(502).json({ error: 'Payment service error' });
+      const raw = await yookassaResponse.text();
+      let parsed: any = null;
+      try { parsed = JSON.parse(raw); } catch { /* keep raw */ }
+      logger.error('YooKassa create payment error', {
+        status: yookassaResponse.status,
+        body: parsed ?? raw,
+      });
+      const description = parsed?.description || parsed?.error_description || raw || 'Unknown error';
+      return res.status(502).json({
+        error: `YooKassa: ${description}`,
+        yookassa_status: yookassaResponse.status,
+        yookassa_code: parsed?.code,
+        yookassa_parameter: parsed?.parameter,
+      });
     }
 
     const payment = await yookassaResponse.json() as {
