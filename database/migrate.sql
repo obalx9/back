@@ -920,3 +920,81 @@ WHERE NOT EXISTS (SELECT 1 FROM site_metrics WHERE order_index = 1);
 INSERT INTO site_metrics (label, value, icon, order_index)
 SELECT 'Преподавателей', '150+', 'Award', 2
 WHERE NOT EXISTS (SELECT 1 FROM site_metrics WHERE order_index = 2);
+
+-- ============================================================================
+-- PAYMENT SYSTEM (orders + withdrawal_requests)
+-- ============================================================================
+
+-- courses: payment fields
+-- price column type: migrate.sql already creates it as numeric.
+-- We store price in kopecks (integer), so change type if it is still numeric.
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'courses' AND column_name = 'price'
+      AND data_type = 'numeric'
+  ) THEN
+    ALTER TABLE courses ALTER COLUMN price TYPE integer USING COALESCE(price::integer, 0);
+    ALTER TABLE courses ALTER COLUMN price SET DEFAULT 0;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='courses' AND column_name='payment_enabled') THEN
+    ALTER TABLE courses ADD COLUMN payment_enabled boolean DEFAULT false;
+  END IF;
+END $$;
+
+-- orders
+CREATE TABLE IF NOT EXISTS orders (
+  id                   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  course_id            uuid        NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  user_id              uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount               integer     NOT NULL,
+  platform_fee         integer     NOT NULL DEFAULT 0,
+  seller_amount        integer     NOT NULL DEFAULT 0,
+  status               text        NOT NULL DEFAULT 'pending'
+                                   CHECK (status IN ('pending', 'succeeded', 'canceled', 'refunded')),
+  yookassa_payment_id  text        UNIQUE,
+  yookassa_payment_url text,
+  metadata             jsonb       DEFAULT '{}',
+  created_at           timestamptz DEFAULT now(),
+  updated_at           timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS orders_course_id_idx        ON orders(course_id);
+CREATE INDEX IF NOT EXISTS orders_user_id_idx          ON orders(user_id);
+CREATE INDEX IF NOT EXISTS orders_status_idx           ON orders(status);
+CREATE INDEX IF NOT EXISTS orders_yookassa_payment_id_idx ON orders(yookassa_payment_id);
+CREATE INDEX IF NOT EXISTS orders_created_at_idx       ON orders(created_at DESC);
+
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS update_orders_updated_at ON orders;
+CREATE TRIGGER update_orders_updated_at
+  BEFORE UPDATE ON orders
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- withdrawal_requests
+CREATE TABLE IF NOT EXISTS withdrawal_requests (
+  id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_id       uuid        NOT NULL REFERENCES sellers(id) ON DELETE CASCADE,
+  amount          integer     NOT NULL CHECK (amount > 0),
+  status          text        NOT NULL DEFAULT 'pending'
+                              CHECK (status IN ('pending', 'approved', 'rejected', 'paid')),
+  payment_details jsonb       DEFAULT '{}',
+  admin_note      text,
+  created_at      timestamptz DEFAULT now(),
+  updated_at      timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS withdrawal_requests_seller_id_idx  ON withdrawal_requests(seller_id);
+CREATE INDEX IF NOT EXISTS withdrawal_requests_status_idx     ON withdrawal_requests(status);
+CREATE INDEX IF NOT EXISTS withdrawal_requests_created_at_idx ON withdrawal_requests(created_at DESC);
+
+ALTER TABLE withdrawal_requests DISABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS update_withdrawal_requests_updated_at ON withdrawal_requests;
+CREATE TRIGGER update_withdrawal_requests_updated_at
+  BEFORE UPDATE ON withdrawal_requests
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
