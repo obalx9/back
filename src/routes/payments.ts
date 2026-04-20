@@ -129,7 +129,10 @@ router.post('/create', async (req: AuthRequest, res) => {
       return res.status(502).json({ error: 'Payment service error' });
     }
 
-    const payment = await yookassaResponse.json();
+    const payment = await yookassaResponse.json() as {
+      id: string;
+      confirmation?: { confirmation_url?: string };
+    };
 
     const orderResult = await query(`
       INSERT INTO orders (course_id, user_id, amount, platform_fee, seller_amount, status, yookassa_payment_id, yookassa_payment_url, metadata)
