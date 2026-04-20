@@ -1,6 +1,9 @@
 import express from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { AuthRequest } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 import { query } from '../utils/db.js';
@@ -8,38 +11,33 @@ import { uploadToS3, getPresignedUrl, deleteFromS3, generateS3Key, getMediaPubli
 
 const router = express.Router();
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
+const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GB
+
+// Write to /tmp so large files don't exhaust container memory
+const diskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `upload-${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`);
+  },
+});
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: diskStorage,
   limits: { fileSize: MAX_FILE_SIZE },
-  fileFilter: (req, file, cb) => {
-    const allowedMimes = [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp',
-      'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska',
-      'video/x-ms-wmv', 'video/3gpp', 'video/x-flv', 'video/mpeg',
-      'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm', 'audio/aac', 'audio/mp4',
-      'application/pdf', 'application/octet-stream',
-      'text/plain',
-      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ];
-    if (allowedMimes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(null, true);
-    }
-  }
 });
 
 router.post('/upload', upload.single('file'), async (req: AuthRequest, res) => {
+  const tmpPath = req.file?.path;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
     const s3Key = generateS3Key('course-media', req.file.originalname);
+    const fileStream = fs.createReadStream(req.file.path);
 
-    const result = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype);
+    const result = await uploadToS3(fileStream, s3Key, req.file.mimetype, req.file.size);
 
     if (!result.success) {
       return res.status(500).json({ error: result.error || 'Failed to upload to storage' });
@@ -54,6 +52,8 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res) => {
   } catch (error) {
     logger.error('Upload error:', error);
     res.status(500).json({ error: 'Failed to upload file' });
+  } finally {
+    if (tmpPath) fs.unlink(tmpPath, () => {});
   }
 });
 

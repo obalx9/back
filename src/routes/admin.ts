@@ -57,7 +57,8 @@ router.delete('/sellers/:id', async (req: AuthRequest, res) => {
 router.get('/users', async (req: AuthRequest, res) => {
   try {
     const result = await query(`
-      SELECT u.*,
+      SELECT u.id, u.user_id, u.telegram_username, u.first_name, u.last_name,
+        u.email, u.oauth_provider, u.photo_url, u.is_blocked, u.created_at,
         array_agg(ur.role) FILTER (WHERE ur.role IS NOT NULL) as roles
       FROM users u
       LEFT JOIN user_roles ur ON u.id = ur.user_id
@@ -69,6 +70,37 @@ router.get('/users', async (req: AuthRequest, res) => {
   } catch (error) {
     logger.error('Get users error:', error);
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+router.patch('/users/:id/block', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { is_blocked } = req.body;
+
+    // Prevent blocking super_admins
+    const roleCheck = await query(
+      `SELECT 1 FROM user_roles WHERE user_id = $1 AND role = 'super_admin'`,
+      [id]
+    );
+    if (roleCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'Cannot block a super admin' });
+    }
+
+    const result = await query(
+      `UPDATE users SET is_blocked = $1 WHERE id = $2
+       RETURNING id, first_name, last_name, telegram_username, is_blocked`,
+      [is_blocked, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    logger.error('Block user error:', error);
+    res.status(500).json({ error: 'Failed to update user block status' });
   }
 });
 
@@ -119,10 +151,15 @@ router.patch('/sellers/:id/premium', async (req: AuthRequest, res) => {
 router.get('/courses', async (req: AuthRequest, res) => {
   try {
     const result = await query(`
-      SELECT c.*, s.business_name as seller_name,
-        (SELECT COUNT(*) FROM course_enrollments WHERE course_id = c.id) as enrollment_count
+      SELECT c.id, c.title, c.description, c.is_published, c.is_active, c.created_at,
+        c.price, c.payment_enabled, c.thumbnail_url, c.seller_id,
+        s.business_name as seller_name, s.id as seller_db_id,
+        u.first_name, u.last_name, u.telegram_username,
+        (SELECT COUNT(*) FROM course_enrollments WHERE course_id = c.id) as enrollment_count,
+        (SELECT COUNT(*) FROM course_posts WHERE course_id = c.id) as post_count
       FROM courses c
       LEFT JOIN sellers s ON c.seller_id = s.id
+      LEFT JOIN users u ON s.user_id = u.id
       ORDER BY c.created_at DESC
     `);
 
@@ -130,6 +167,27 @@ router.get('/courses', async (req: AuthRequest, res) => {
   } catch (error) {
     logger.error('Get courses error:', error);
     res.status(500).json({ error: 'Failed to fetch courses' });
+  }
+});
+
+router.patch('/courses/:id/moderate', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { is_published } = req.body;
+
+    const result = await query(`
+      UPDATE courses SET is_published = $1 WHERE id = $2
+      RETURNING id, title, is_published
+    `, [is_published, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    logger.error('Moderate course error:', error);
+    res.status(500).json({ error: 'Failed to moderate course' });
   }
 });
 

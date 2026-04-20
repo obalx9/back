@@ -3,6 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { logger } from './logger.js';
 import crypto from 'crypto';
 import path from 'path';
+import { Readable } from 'stream';
 
 const S3_ENDPOINT = process.env.S3_ENDPOINT || 'https://s3.twcstorage.ru';
 const S3_REGION = process.env.S3_REGION || 'ru-1';
@@ -28,16 +29,18 @@ export function generateS3Key(prefix: string, originalName?: string): string {
 }
 
 export async function uploadToS3(
-  buffer: Buffer,
+  body: Buffer | Readable,
   key: string,
-  contentType?: string
+  contentType?: string,
+  contentLength?: number
 ): Promise<{ success: boolean; key?: string; url?: string; error?: string }> {
   try {
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
-      Body: buffer,
+      Body: body,
       ContentType: contentType || 'application/octet-stream',
+      ...(contentLength !== undefined ? { ContentLength: contentLength } : {}),
     });
 
     await s3Client.send(command);

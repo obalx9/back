@@ -64,6 +64,9 @@ router.post('/telegram', async (req: Request, res: Response) => {
     let userId: string;
 
     if (userResult.rows.length > 0) {
+      if (userResult.rows[0].is_blocked) {
+        return res.status(403).json({ error: 'Аккаунт заблокирован. Обратитесь в поддержку.' });
+      }
       await query(
         `UPDATE users
          SET telegram_username = $1, first_name = $2, last_name = $3, photo_url = $4
@@ -141,6 +144,10 @@ router.post('/oauth/session', async (req: Request, res: Response) => {
     }
 
     const user = userResult.rows[0];
+
+    if (user.is_blocked) {
+      return res.status(403).json({ error: 'Аккаунт заблокирован. Обратитесь в поддержку.' });
+    }
 
     const rolesResult = await query(
       'SELECT role FROM user_roles WHERE user_id = $1',
@@ -249,6 +256,10 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     const user = userResult.rows[0];
+
+    if (user.is_blocked) {
+      return res.status(403).json({ error: 'Аккаунт заблокирован. Обратитесь в поддержку.' });
+    }
 
     const rolesResult = await query('SELECT role FROM user_roles WHERE user_id = $1', [userId]);
     const roles = rolesResult.rows.map((r: any) => r.role);
