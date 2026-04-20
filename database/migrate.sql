@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS ad_post_stats (
 
 -- users
 DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='is_blocked') THEN
+    ALTER TABLE users ADD COLUMN is_blocked boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
+DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='oauth_id') THEN
     ALTER TABLE users ADD COLUMN oauth_id text;
   END IF;
