@@ -107,7 +107,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     let paramCount = 1;
 
     for (const [key, value] of Object.entries(updates)) {
-      if (['title', 'description', 'price', 'thumbnail_url', 'is_published', 'is_active', 'display_settings', 'theme_config', 'theme_preset', 'watermark', 'watermark_enabled', 'watermark_text', 'telegram_chat_id', 'autoplay_videos', 'reverse_post_order', 'show_post_dates', 'show_lesson_numbers', 'compact_view', 'allow_downloads'].includes(key)) {
+      if (['title', 'description', 'price', 'payment_enabled', 'thumbnail_url', 'is_published', 'is_active', 'display_settings', 'theme_config', 'theme_preset', 'watermark', 'watermark_enabled', 'watermark_text', 'telegram_chat_id', 'autoplay_videos', 'reverse_post_order', 'show_post_dates', 'show_lesson_numbers', 'compact_view', 'allow_downloads'].includes(key)) {
         fields.push(`${key} = $${paramCount}`);
         values.push(value);
         paramCount++;
