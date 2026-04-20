@@ -105,7 +105,9 @@ router.post('/create', async (req: AuthRequest, res) => {
     const platformFee = Math.round(amount * PLATFORM_FEE_PERCENT / 100);
     const sellerAmount = amount - platformFee;
 
-    const idempotenceKey = `${userId}-${course_id}-${Date.now()}`;
+    // YooKassa: max 64 chars for Idempotence-Key
+    const rawKey = `${userId}-${course_id}-${Date.now()}`;
+    const idempotenceKey = rawKey.length <= 64 ? rawKey : rawKey.slice(rawKey.length - 64);
     const description = `Курс: ${course.title}`.slice(0, 128);
 
     const yookassaResponse = await fetch('https://api.yookassa.ru/v3/payments', {
