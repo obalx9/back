@@ -270,6 +270,76 @@ router.post('/webhook', async (req, res) => {
   }
 });
 
+// POST /api/payments/confirm/:courseId — called on return from YooKassa to sync enrollment
+// Falls back to polling YooKassa directly if webhook hasn't arrived yet
+router.post('/confirm/:courseId', async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const { courseId } = req.params;
+
+    // Already enrolled?
+    const enrolledCheck = await query(`
+      SELECT ce.id FROM course_enrollments ce
+      WHERE ce.course_id = $1 AND ce.student_id = $2
+    `, [courseId, userId]);
+
+    if (enrolledCheck.rows.length > 0) {
+      return res.json({ enrolled: true });
+    }
+
+    // Find a succeeded order (webhook may have already updated it)
+    const orderResult = await query(
+      "SELECT id, yookassa_payment_id, status FROM orders WHERE course_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1",
+      [courseId, userId]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.json({ enrolled: false });
+    }
+
+    const order = orderResult.rows[0];
+
+    // If order is succeeded but not yet enrolled — enroll now
+    if (order.status === 'succeeded') {
+      await query(`
+        INSERT INTO course_enrollments (course_id, student_id, granted_by, expires_at)
+        VALUES ($1, $2, $2, NULL)
+        ON CONFLICT DO NOTHING
+      `, [courseId, userId]);
+      return res.json({ enrolled: true });
+    }
+
+    // Order still pending — ask YooKassa directly
+    if (order.status === 'pending' && order.yookassa_payment_id && yookassaConfigured()) {
+      const ykRes = await fetch(`https://api.yookassa.ru/v3/payments/${order.yookassa_payment_id}`, {
+        headers: { 'Authorization': yookassaAuth() },
+      });
+
+      if (ykRes.ok) {
+        const payment: any = await ykRes.json();
+        if (payment.status === 'succeeded') {
+          await query(
+            "UPDATE orders SET status = 'succeeded', updated_at = now() WHERE id = $1",
+            [order.id]
+          );
+          await query(`
+            INSERT INTO course_enrollments (course_id, student_id, granted_by, expires_at)
+            VALUES ($1, $2, $2, NULL)
+            ON CONFLICT DO NOTHING
+          `, [courseId, userId]);
+          logger.info(`Confirm endpoint enrolled user ${userId} in course ${courseId}`);
+          return res.json({ enrolled: true });
+        }
+      }
+    }
+
+    res.json({ enrolled: false });
+  } catch (error) {
+    logger.error('Confirm enrollment error:', error);
+    res.status(500).json({ error: 'Failed to confirm enrollment' });
+  }
+});
+
 // GET /api/payments/check/:courseId — check if user already purchased a course
 router.get('/check/:courseId', async (req: AuthRequest, res) => {
   try {
