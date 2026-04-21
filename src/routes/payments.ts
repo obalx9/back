@@ -10,7 +10,6 @@ const YOOKASSA_SECRET_KEY = process.env.YOOKASSA_SECRET_KEY || '';
 const PLATFORM_FEE_PERCENT = 10;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 // Tax system: usn_income, usn_income_outcome, envd, esn, patent, osn
-const TAX_SYSTEM_CODE = process.env.YOOKASSA_TAX_SYSTEM || 'usn_income';
 // VAT code: 1=без НДС, 2=0%, 3=10%, 4=20%
 const VAT_CODE = parseInt(process.env.YOOKASSA_VAT_CODE || '1', 10);
 
@@ -125,7 +124,6 @@ router.post('/create', async (req: AuthRequest, res) => {
 
     const receipt = {
       customer: { email: buyerEmail },
-      tax_system_code: TAX_SYSTEM_CODE,
       items: [
         {
           description: course.title.slice(0, 128),
