@@ -50,21 +50,236 @@ router.get('/course/:courseId/public', async (req, res) => {
   }
 });
 
+// GET /api/payments/promo/validate — validate a promo code (auth required)
+router.get('/promo/validate', async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const { code, course_id } = req.query as Record<string, string>;
+
+    if (!code || !course_id) {
+      return res.status(400).json({ error: 'code and course_id are required' });
+    }
+
+    // Get course price and seller
+    const courseResult = await query(
+      'SELECT id, title, price, payment_enabled, seller_id FROM courses WHERE id = $1 AND is_published = true',
+      [course_id]
+    );
+    if (courseResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+    const course = courseResult.rows[0];
+
+    // Look up promo code for this seller — must match seller and optionally course
+    const promoResult = await query(`
+      SELECT pc.*
+      FROM promo_codes pc
+      JOIN sellers s ON pc.seller_id = s.id
+      WHERE UPPER(pc.code) = UPPER($1)
+        AND pc.seller_id = $2
+        AND pc.is_active = true
+        AND (pc.course_id IS NULL OR pc.course_id = $3)
+        AND (pc.max_uses IS NULL OR pc.uses_count < pc.max_uses)
+        AND (pc.expires_at IS NULL OR pc.expires_at > now())
+    `, [code, course.seller_id, course_id]);
+
+    if (promoResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Промокод недействителен или уже использован' });
+    }
+
+    const promo = promoResult.rows[0];
+
+    // Check user hasn't already used this promo code
+    const usedCheck = await query(
+      'SELECT id FROM promo_code_uses WHERE promo_code_id = $1 AND user_id = $2',
+      [promo.id, userId]
+    );
+    if (usedCheck.rows.length > 0) {
+      return res.status(409).json({ error: 'Вы уже использовали этот промокод' });
+    }
+
+    // Calculate discount
+    let discountAmount = 0;
+    if (promo.discount_type === 'percent') {
+      discountAmount = Math.round(course.price * promo.discount_value / 100);
+    } else {
+      discountAmount = Math.min(promo.discount_value, course.price);
+    }
+    const finalPrice = Math.max(0, course.price - discountAmount);
+
+    res.json({
+      valid: true,
+      promo_code_id: promo.id,
+      code: promo.code,
+      discount_type: promo.discount_type,
+      discount_value: promo.discount_value,
+      discount_amount: discountAmount,
+      original_price: course.price,
+      final_price: finalPrice,
+    });
+  } catch (error) {
+    logger.error('Validate promo code error:', error);
+    res.status(500).json({ error: 'Failed to validate promo code' });
+  }
+});
+
+// ─── SELLER PROMO CODE MANAGEMENT ──────────────────────────────────────────
+
+// GET /api/payments/promo/seller — list seller's own promo codes
+router.get('/promo/seller', async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const sellerResult = await query('SELECT id FROM sellers WHERE user_id = $1', [userId]);
+    if (sellerResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Seller not found' });
+    }
+    const sellerId = sellerResult.rows[0].id;
+
+    const result = await query(`
+      SELECT pc.*,
+        c.title as course_title,
+        (
+          SELECT COUNT(*) FROM promo_code_uses pcu WHERE pcu.promo_code_id = pc.id
+        ) as total_uses,
+        (
+          SELECT COALESCE(SUM(pcu.discount_amount), 0) FROM promo_code_uses pcu WHERE pcu.promo_code_id = pc.id
+        ) as total_discount_given
+      FROM promo_codes pc
+      LEFT JOIN courses c ON pc.course_id = c.id
+      WHERE pc.seller_id = $1
+      ORDER BY pc.created_at DESC
+    `, [sellerId]);
+
+    res.json(result.rows);
+  } catch (error) {
+    logger.error('Get promo codes error:', error);
+    res.status(500).json({ error: 'Failed to fetch promo codes' });
+  }
+});
+
+// POST /api/payments/promo/seller — create a promo code
+router.post('/promo/seller', async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const sellerResult = await query('SELECT id FROM sellers WHERE user_id = $1', [userId]);
+    if (sellerResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Seller not found' });
+    }
+    const sellerId = sellerResult.rows[0].id;
+
+    const { code, discount_type, discount_value, course_id, max_uses, expires_at } = req.body;
+
+    if (!code || !discount_type || !discount_value) {
+      return res.status(400).json({ error: 'code, discount_type, discount_value are required' });
+    }
+    if (!['percent', 'fixed'].includes(discount_type)) {
+      return res.status(400).json({ error: 'discount_type must be percent or fixed' });
+    }
+    if (discount_type === 'percent' && (discount_value < 1 || discount_value > 100)) {
+      return res.status(400).json({ error: 'Percent discount must be 1-100' });
+    }
+
+    // Verify course belongs to seller if provided
+    if (course_id) {
+      const courseCheck = await query(
+        'SELECT id FROM courses WHERE id = $1 AND seller_id = $2',
+        [course_id, sellerId]
+      );
+      if (courseCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Course not found or not yours' });
+      }
+    }
+
+    const result = await query(`
+      INSERT INTO promo_codes (seller_id, course_id, code, discount_type, discount_value, max_uses, expires_at)
+      VALUES ($1, $2, UPPER($3), $4, $5, $6, $7)
+      RETURNING *
+    `, [sellerId, course_id || null, code, discount_type, discount_value, max_uses || null, expires_at || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error: any) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Промокод с таким кодом уже существует' });
+    }
+    logger.error('Create promo code error:', error);
+    res.status(500).json({ error: 'Failed to create promo code' });
+  }
+});
+
+// PATCH /api/payments/promo/seller/:id — update (toggle active, etc.)
+router.patch('/promo/seller/:id', async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const { id } = req.params;
+    const sellerResult = await query('SELECT id FROM sellers WHERE user_id = $1', [userId]);
+    if (sellerResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Seller not found' });
+    }
+    const sellerId = sellerResult.rows[0].id;
+
+    const { is_active, max_uses, expires_at } = req.body;
+
+    const result = await query(`
+      UPDATE promo_codes
+      SET
+        is_active = COALESCE($1, is_active),
+        max_uses = COALESCE($2, max_uses),
+        expires_at = COALESCE($3, expires_at),
+        updated_at = now()
+      WHERE id = $4 AND seller_id = $5
+      RETURNING *
+    `, [is_active, max_uses, expires_at, id, sellerId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Promo code not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    logger.error('Update promo code error:', error);
+    res.status(500).json({ error: 'Failed to update promo code' });
+  }
+});
+
+// DELETE /api/payments/promo/seller/:id
+router.delete('/promo/seller/:id', async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const { id } = req.params;
+    const sellerResult = await query('SELECT id FROM sellers WHERE user_id = $1', [userId]);
+    if (sellerResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Seller not found' });
+    }
+    const sellerId = sellerResult.rows[0].id;
+
+    const result = await query(
+      'DELETE FROM promo_codes WHERE id = $1 AND seller_id = $2 AND uses_count = 0 RETURNING id',
+      [id, sellerId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Промокод не найден или уже использован (нельзя удалить)' });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Delete promo code error:', error);
+    res.status(500).json({ error: 'Failed to delete promo code' });
+  }
+});
+
 // POST /api/payments/create — create a YooKassa payment (auth required)
 router.post('/create', async (req: AuthRequest, res) => {
   try {
     const userId = req.userId!;
-    const { course_id } = req.body;
+    const { course_id, promo_code } = req.body;
 
     if (!course_id) {
       return res.status(400).json({ error: 'course_id is required' });
     }
 
     const courseResult = await query(
-      'SELECT id, title, price, payment_enabled FROM courses WHERE id = $1 AND is_published = true',
+      'SELECT id, title, price, payment_enabled, seller_id FROM courses WHERE id = $1 AND is_published = true',
       [course_id]
     );
-
 
     if (courseResult.rows.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
@@ -87,17 +302,51 @@ router.post('/create', async (req: AuthRequest, res) => {
       return res.status(409).json({ error: 'Already enrolled in this course' });
     }
 
-    // Check for existing pending order
-    const existingOrder = await query(
-      "SELECT id, yookassa_payment_url FROM orders WHERE course_id = $1 AND user_id = $2 AND status = 'pending'",
-      [course_id, userId]
-    );
+    // Validate and apply promo code if provided
+    let promoCodeId: string | null = null;
+    let discountAmount = 0;
 
-    if (existingOrder.rows.length > 0 && existingOrder.rows[0].yookassa_payment_url) {
-      return res.json({
-        payment_url: existingOrder.rows[0].yookassa_payment_url,
-        order_id: existingOrder.rows[0].id,
-      });
+    if (promo_code) {
+      const promoResult = await query(`
+        SELECT pc.*
+        FROM promo_codes pc
+        WHERE UPPER(pc.code) = UPPER($1)
+          AND pc.seller_id = $2
+          AND pc.is_active = true
+          AND (pc.course_id IS NULL OR pc.course_id = $3)
+          AND (pc.max_uses IS NULL OR pc.uses_count < pc.max_uses)
+          AND (pc.expires_at IS NULL OR pc.expires_at > now())
+      `, [promo_code, course.seller_id, course_id]);
+
+      if (promoResult.rows.length > 0) {
+        const promo = promoResult.rows[0];
+        const usedCheck = await query(
+          'SELECT id FROM promo_code_uses WHERE promo_code_id = $1 AND user_id = $2',
+          [promo.id, userId]
+        );
+        if (usedCheck.rows.length === 0) {
+          promoCodeId = promo.id;
+          if (promo.discount_type === 'percent') {
+            discountAmount = Math.round(course.price * promo.discount_value / 100);
+          } else {
+            discountAmount = Math.min(promo.discount_value, course.price);
+          }
+        }
+      }
+    }
+
+    // Check for existing pending order (without promo — new promo needs new order)
+    if (!promo_code) {
+      const existingOrder = await query(
+        "SELECT id, yookassa_payment_url FROM orders WHERE course_id = $1 AND user_id = $2 AND status = 'pending'",
+        [course_id, userId]
+      );
+      if (existingOrder.rows.length > 0 && existingOrder.rows[0].yookassa_payment_url) {
+        return res.json({
+          payment_url: existingOrder.rows[0].yookassa_payment_url,
+          order_id: existingOrder.rows[0].id,
+        });
+      }
     }
 
     if (!yookassaConfigured()) {
@@ -113,7 +362,8 @@ router.post('/create', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Для оплаты необходим email. Пожалуйста, укажите email в профиле.' });
     }
 
-    const amount = course.price;
+    const originalAmount = course.price;
+    const amount = Math.max(0, originalAmount - discountAmount);
     const platformFee = Math.round(amount * PLATFORM_FEE_PERCENT / 100);
     const sellerAmount = amount - platformFee;
 
@@ -188,8 +438,8 @@ router.post('/create', async (req: AuthRequest, res) => {
     };
 
     const orderResult = await query(`
-      INSERT INTO orders (course_id, user_id, amount, platform_fee, seller_amount, status, yookassa_payment_id, yookassa_payment_url, metadata)
-      VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)
+      INSERT INTO orders (course_id, user_id, amount, platform_fee, seller_amount, status, yookassa_payment_id, yookassa_payment_url, metadata, promo_code_id, discount_amount, original_amount)
+      VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11)
       RETURNING id
     `, [
       course_id,
@@ -200,12 +450,31 @@ router.post('/create', async (req: AuthRequest, res) => {
       payment.id,
       payment.confirmation?.confirmation_url || null,
       JSON.stringify({ idempotence_key: idempotenceKey }),
+      promoCodeId,
+      discountAmount,
+      originalAmount,
     ]);
+
+    // Record promo code use and increment counter
+    if (promoCodeId && discountAmount > 0) {
+      await query(
+        'INSERT INTO promo_code_uses (promo_code_id, order_id, user_id, discount_amount) VALUES ($1, $2, $3, $4)',
+        [promoCodeId, orderResult.rows[0].id, userId, discountAmount]
+      );
+      await query(
+        'UPDATE promo_codes SET uses_count = uses_count + 1, updated_at = now() WHERE id = $1',
+        [promoCodeId]
+      );
+    }
 
     res.json({
       payment_url: payment.confirmation?.confirmation_url,
       order_id: orderResult.rows[0].id,
       payment_id: payment.id,
+      discount_applied: discountAmount > 0,
+      discount_amount: discountAmount,
+      original_amount: originalAmount,
+      final_amount: amount,
     });
   } catch (error) {
     logger.error('Create payment error:', error);
