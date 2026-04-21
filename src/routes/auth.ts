@@ -344,4 +344,32 @@ router.post('/update-roles', async (req: Request, res: Response) => {
   }
 });
 
+router.patch('/update-email', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const payload = verifyToken(authHeader.substring(7));
+    if (!payload?.sub) return res.status(401).json({ error: 'Invalid token' });
+
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    await query('UPDATE users SET email = $1 WHERE id = $2', [email.toLowerCase().trim(), payload.sub]);
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Update email error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
