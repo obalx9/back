@@ -98,9 +98,9 @@ app.use('/media', (req, res, next) => {
   return authMiddleware(req as any, res, next);
 }, mediaRouter);
 
-// Payment routes: webhook and course public info are public, rest requires auth
+// Payment routes: webhook, public course info, and promo validate are public; rest requires auth
 app.use('/api/payments', (req, res, next) => {
-  if (req.path.startsWith('/webhook') || req.path.startsWith('/course/')) return next();
+  if (req.path.startsWith('/webhook') || req.path.startsWith('/course/') || req.path === '/promo/validate') return next();
   return authMiddleware(req as any, res, next);
 }, paymentsRouter);
 

@@ -50,10 +50,10 @@ router.get('/course/:courseId/public', async (req, res) => {
   }
 });
 
-// GET /api/payments/promo/validate — validate a promo code (auth required)
+// GET /api/payments/promo/validate — validate a promo code (public, no auth required)
 router.get('/promo/validate', async (req: AuthRequest, res) => {
   try {
-    const userId = req.userId!;
+    const userId = req.userId; // may be undefined for unauthenticated visitors
     const { code, course_id } = req.query as Record<string, string>;
 
     if (!code || !course_id) {
@@ -74,7 +74,6 @@ router.get('/promo/validate', async (req: AuthRequest, res) => {
     const promoResult = await query(`
       SELECT pc.*
       FROM promo_codes pc
-      JOIN sellers s ON pc.seller_id = s.id
       WHERE UPPER(pc.code) = UPPER($1)
         AND pc.seller_id = $2
         AND pc.is_active = true
@@ -89,13 +88,15 @@ router.get('/promo/validate', async (req: AuthRequest, res) => {
 
     const promo = promoResult.rows[0];
 
-    // Check user hasn't already used this promo code
-    const usedCheck = await query(
-      'SELECT id FROM promo_code_uses WHERE promo_code_id = $1 AND user_id = $2',
-      [promo.id, userId]
-    );
-    if (usedCheck.rows.length > 0) {
-      return res.status(409).json({ error: 'Вы уже использовали этот промокод' });
+    // If authenticated, check the user hasn't already used this promo code
+    if (userId) {
+      const usedCheck = await query(
+        'SELECT id FROM promo_code_uses WHERE promo_code_id = $1 AND user_id = $2',
+        [promo.id, userId]
+      );
+      if (usedCheck.rows.length > 0) {
+        return res.status(409).json({ error: 'Вы уже использовали этот промокод' });
+      }
     }
 
     // Calculate discount
